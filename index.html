@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>TuxGuessr – stable Mapillary embed</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- Leaflet -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <link rel="icon" href="data:," />
+
+  <style>
+    body { margin:0; font-family: system-ui, sans-serif; background:#111; color:#eee; }
+    header { padding:10px 16px; background:#181818; border-bottom:1px solid #333; display:flex; justify-content:space-between; align-items:center; }
+    #container { display:flex; flex-direction:column; height:calc(100vh - 52px); }
+    #top { flex:1; position:relative; }
+    #embed-container { width:100%; height:100%; }
+    #embed-container iframe { width:100%; height:100%; border:0; }
+    #hint { position:absolute; bottom:10px; left:10px; background:rgba(0,0,0,0.7); padding:6px 10px; border-radius:4px; font-size:13px; }
+    #bottom { height:40vh; display:flex; border-top:1px solid #333; }
+    #map { flex:1; }
+    #sidebar { width:260px; background:#181818; border-left:1px solid #333; padding:10px; box-sizing:border-box; font-size:14px; }
+    button { background:#2f7dff; border:none; color:#fff; padding:6px 10px; border-radius:4px; cursor:pointer; font-size:14px; }
+    button:disabled { opacity:0.5; cursor:default; }
+    .btn-row { display:flex; gap:8px; margin-top:8px; flex-wrap:wrap; }
+    .stat { margin-top:6px; }
+  </style>
+</head>
+<body>
+<header>
+  <div><strong>TuxGuessr</strong></div>
+  <div>Score: <span id="score">0</span> | Round: <span id="round">0</span>/5</div>
+</header>
+
+<div id="container">
+  <div id="top">
+    <div id="embed-container"></div>
+  </div>
+  <div id="bottom">
+    <div id="map"></div>
+    <div id="sidebar">
+      <div><strong>How to play</strong></div>
+      <div class="stat">A random view is shown.</div>
+      <div class="stat">Click on the map where you think the camera is.</div>
+      <div class="stat" id="last-result">No guess yet.</div>
+      <div class="stat" id="place-name"></div>
+      <div class="stat" id="round-score"></div>
+      <div class="btn-row">
+        <button id="guess-btn" disabled>Make guess</button>
+        <button id="next-btn" disabled>Next round</button>
+        <button id="reset-btn">Restart</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const TOTAL_ROUNDS = 5;
+const MAPILLARY_URLS = [
+  "https://www.mapillary.com/app/user/langfingaz?lat=47.12206393328702&lng=11.69598118333397&z=17&pKey=6148596005199563",
+  "https://www.mapillary.com/app/?lat=47.11349923413198&lng=11.679691106886025&z=19.398143373315477&pKey=627787011525172&x=0.5101210600926268&y=0.4912426017262317&zoom=0",
+  "https://www.mapillary.com/app/?lat=47.154973813745755&lng=11.725430792668476&z=18.412301767907397&pKey=1021611336752742&x=0.4382788401303928&y=0.5198398424650861&zoom=0",
+  "https://www.mapillary.com/app/?lat=47.16221621614193&lng=11.744903402101613&z=17.53109819465828&pKey=993502815909969&x=0.22180211571219755&y=0.5394866416650668&zoom=0",
+  "https://www.mapillary.com/app/?lat=47.06165210002402&lng=11.679886033228968&z=17&pKey=502460661861300",
+  "https://www.mapillary.com/app/?lat=47.06165210002402&lng=11.679886033228968&z=17&pKey=135224149330814&x=0.4928395099286526&y=0.5063307701306944&zoom=0",
+  "https://www.mapillary.com/app/?lat=47.06130254564309&lng=11.67984573466697&z=18.002403101646614&pKey=548458200430179&x=0.5016121560019977&y=0.5066638385521093&zoom=0",
+  "https://www.mapillary.com/app/?lat=47.06198853372928&lng=11.680163151260103&z=18.49711296916037&pKey=855906018791243",
+  "https://www.mapillary.com/app/?lat=47.062571083141364&lng=11.680434923797975&z=18.49711296916037&pKey=5599052070170326",
+  "https://www.mapillary.com/app/?lat=47.06277691688081&lng=11.680398818822823&z=18.49711296916037&pKey=531284262347667",
+  "https://www.mapillary.com/app/?lat=47.1078116592067&lng=11.674681095689039&z=18.55926175146857&pKey=664406229807723&x=0.09408767800321077&y=0.5690642173006153&zoom=0",
+  "https://www.mapillary.com/app/?lat=47.1080043763059&lng=11.67482120501495&z=17.887267741706413&pKey=822665249151350",
+  "https://www.mapillary.com/app/?lat=47.10986376833134&lng=11.675421664950818&z=17.887267741706413&pKey=677658718760864&x=0.10821902298700475&y=0.5762484468357816&zoom=0",
+  "https://www.mapillary.com/app/?lat=47.1128763931238&lng=11.679059722217175&z=17.243184593125854&pKey=1426021305489651&x=0.9193705021179284&y=0.49468574863609716&zoom=0",
+  "https://www.mapillary.com/app/?lat=47.115216449400464&lng=11.682464717150651&z=18.207475461614926&pKey=981803072609128&x=0.5123582312130098&y=0.4668804767781135&zoom=0",
+  "https://www.mapillary.com/app/?lat=47.11611706119797&lng=11.684516014537735&z=18.82763912235198&pKey=4285793061504138",
+  "https://www.mapillary.com/app/?lat=47.121170017508376&lng=11.69087965995277&z=17.505050514797315&pKey=9883390678418250&x=0.5929784533612749&y=0.41516136574979673&zoom=0",
+  "https://www.mapillary.com/app/?lat=47.1270719588274&lng=11.696658866383359&z=18.24392557266597&pKey=859216241636334",
+  "https://www.mapillary.com/app/?lat=47.12780392916699&lng=11.697801366667022&z=18.24392557266597&pKey=24041948848744517&x=0.9455435846984301&y=0.4619033014704947&zoom=0.7759541915120032",
+  "https://www.mapillary.com/app/?lat=47.129338180302256&lng=11.698191352409253&z=17.87107335887247&pKey=1992272760947757",
+  "https://www.mapillary.com/app/?lat=47.13442278333301&lng=11.702586245833004&z=17.34299301351444&pKey=1021987359593841&x=0.9679080626058546&y=0.4834908280278833&zoom=0.029095687598825613",
+  "https://www.mapillary.com/app/?lat=47.1365201592117&lng=11.70471790317572&z=17.34299301351444&pKey=1181942646052397&x=0.4928619691256182&y=0.4953675115920172&zoom=0",
+  "https://www.mapillary.com/app/?lat=47.13691747554188&lng=11.706592018166134&z=17.128192826058584&pKey=467145462214246",
+  "https://www.mapillary.com/app/?lat=47.13703669537705&lng=11.706763644623038&z=17.93127887039952&pKey=377649103814611",
+  "https://www.mapillary.com/app/?lat=47.13703669537705&lng=11.706763644623038&z=17.93127887039952&pKey=996174976025580&x=0.07192438821725616&y=0.4963530533119754&zoom=0",
+  "https://www.mapillary.com/app/?lat=47.13820393628137&lng=11.708814424334605&z=17.93127887039952&pKey=2103749276776837&x=0.5035651786559656&y=0.48565943004111545&zoom=0",
+  "https://www.mapillary.com/app/?lat=47.13914065833299&lng=11.710978104166998&z=17.93127887039952&pKey=658027153899769&x=0.8546886167967426&y=0.49254427602840406&zoom=0",
+  "https://www.mapillary.com/app/?lat=47.140557027365645&lng=11.713919435595926&z=17.93127887039952&pKey=220593576692717",
+  "https://www.mapillary.com/app/?lat=47.141122900792794&lng=11.715275239753282&z=18.62231965660011&pKey=1072381621418002&x=0.3126480260491676&y=0.531120260388627&zoom=0",
+  "https://www.mapillary.com/app/?lat=47.1448958&lng=11.719548312500024&z=17.805076633786985&pKey=1224369826019485&x=0.6240646916898372&y=0.5387954041759797&zoom=0",
+  "https://www.mapillary.com/app/?lat=47.14990937487295&lng=11.721659421482627&z=18.48371371356872&pKey=687190427286407&x=0.25922764601522175&y=0.5475705167955055&zoom=0",
+  "https://www.mapillary.com/app/?lat=47.152153967420475&lng=11.724582369376208&z=18.497445465933556&pKey=1491144241859605&x=0.6508920906291624&y=0.4267362127259843&zoom=0",
+  "https://www.mapillary.com/app/?lat=47.153462743376366&lng=11.725460869414178&z=18.54115186580515&pKey=2098236920680800&x=0.44171600103830116&y=0.4294890490809586&zoom=0",
+  "https://www.mapillary.com/app/?lat=47.15420856350974&lng=11.725320790983005&z=18.54115186580515&pKey=1005466798462506&x=0.5546314764686748&y=0.4404402742863196&zoom=0",
+  "https://www.mapillary.com/app/?lat=47.154380295412466&lng=11.725331846733184&z=18.54115186580515&pKey=1207922867110290&x=0.2997830427969167&y=0.5010888359636522&zoom=0",
+  "https://www.mapillary.com/app/?lat=47.1554707835372&lng=11.726317970913556&z=18.54115186580515&pKey=991105966164571&x=0.49065420860232356&y=0.4500463504945493&zoom=0",
+  "https://www.mapillary.com/app/?lat=47.155528440346586&lng=11.726765880595622&z=18.54115186580515&pKey=1903151190446505&x=0.6466338699831575&y=0.5189352058695768&zoom=0",
+  "https://www.mapillary.com/app/?lat=47.15561116390268&lng=11.727044206100572&z=18.54115186580515&pKey=228465102546451",
+  "https://www.mapillary.com/app/?lat=47.15663895833299&lng=11.728491950000034&z=18.54115186580515&pKey=1337797347517999&x=0.508243103747568&y=0.48949654550279537&zoom=0",
+  "https://www.mapillary.com/app/?lat=47.15735733333298&lng=11.729551108332998&z=18.60803341149578&pKey=2177726179335609&x=0.8860429236296634&y=0.5129091856797263&zoom=0",
+  "https://www.mapillary.com/app/?lat=47.15810161148016&lng=11.730158051162334&z=17.92751216250874&pKey=1630783720962579&x=0.699747333059592&y=0.5137576368837058&zoom=0",
+  "https://www.mapillary.com/app/?lat=47.158665427458374&lng=11.731365172612641&z=17.92751216250874&pKey=9757477057663391&x=0.17530191003232293&y=0.43532835472401626&zoom=0",
+  "https://www.mapillary.com/app/?lat=47.15915636028754&lng=11.732298697244914&z=17.92751216250874&pKey=1853775465479941&x=0.5169935078483988&y=0.4790232441257749&zoom=0",
+  "https://www.mapillary.com/app/?lat=47.160227084234435&lng=11.73570612842434&z=19.108221132098137&pKey=1665401564158447&x=0.1430472234912219&y=0.46646528201542947&zoom=0",
+  "https://www.mapillary.com/app/?lat=47.16069827674431&lng=11.737285001976943&z=19.108221132098137&pKey=1345343486580468&x=0.033227575639726614&y=0.4372673657430738&zoom=0",
+  "https://www.mapillary.com/app/?lat=47.16214347938521&lng=11.741797864076261&z=18.34165944022321&pKey=584644554743532&x=0.800138083604375&y=0.4382413308123748&zoom=0",
+  "https://www.mapillary.com/app/?lat=47.16247733617976&lng=11.742830733955202&z=18.34165944022321&pKey=3479138388895944&x=0.18259876153828367&y=0.5533239449790498&zoom=0",
+  "https://www.mapillary.com/app/?lat=47.161170323743846&lng=11.746516193232424&z=17.32013696854344&pKey=1415456342816528&x=0.712828263318122&y=0.45510576133056824&zoom=0",
+  "https://www.mapillary.com/app/?lat=47.16095996737036&lng=11.749399395289629&z=17.32013696854344&pKey=711662014620774&x=0.3749574814025957&y=0.5295774675538591&zoom=0"
+];
+
+// -------- parsing helpers: URL -> {iframeHtml, lat, lon, key} --------
+
+// Mapillary’s docs: https://www.mapillary.com/embed?image_key=IMAGE_ID&style=photo [web:46]
+function parseMapillaryUrl(url) {
+  try {
+    const u = new URL(url);
+    const lat = parseFloat(u.searchParams.get("lat"));
+    const lon = parseFloat(u.searchParams.get("lng"));
+    const pKey = u.searchParams.get("pKey"); // image key / ID
+
+    if (!pKey || Number.isNaN(lat) || Number.isNaN(lon)) {
+      return null;
+    }
+
+    const embedSrc = `https://www.mapillary.com/embed?image_key=${encodeURIComponent(pKey)}&style=photo`;
+    const iframeHtml = `<iframe src="${embedSrc}" allowfullscreen loading="lazy"></iframe>`;
+
+    return { iframeHtml, lat, lon, key: pKey };
+  } catch (e) {
+    return null;
+  }
+}
+
+// Pre‑parse all URLs
+const LOCATIONS = MAPILLARY_URLS.map(parseMapillaryUrl).filter(Boolean);
+
+if (LOCATIONS.length === 0) {
+  console.warn("No valid Mapillary URLs parsed. Add some to MAPILLARY_URLS.");
+}
+
+// ---------------- core game state ----------------
+let currentIndex = null;
+let currentRound = 0;
+let totalScore = 0;
+let guessLatLng = null;
+let trueMarker = null;
+let guessMarker = null;
+let lineLayer = null;
+
+const scoreEl = document.getElementById("score");
+const roundEl = document.getElementById("round");
+const lastResultEl = document.getElementById("last-result");
+const placeNameEl = document.getElementById("place-name");
+const roundScoreEl = document.getElementById("round-score");
+const guessBtn = document.getElementById("guess-btn");
+const nextBtn = document.getElementById("next-btn");
+const resetBtn = document.getElementById("reset-btn");
+const embedContainer = document.getElementById("embed-container");
+
+// Leaflet map centered roughly on Tux [web:32][web:40]
+const map = L.map("map").setView([47.1355, 11.6939], 12);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 18,
+  attribution: "&copy; OpenStreetMap contributors"
+}).addTo(map);
+
+// Map clicks for guess
+map.on("click", (e) => {
+  if (currentIndex === null || nextBtn.disabled === false) return;
+  guessLatLng = e.latlng;
+  if (guessMarker) map.removeLayer(guessMarker);
+  guessMarker = L.marker(guessLatLng, { title: "Your guess" }).addTo(map);
+  guessBtn.disabled = false;
+});
+
+// Haversine distance (km)
+function distanceKm(a, b) {
+  const R = 6371;
+  const dLat = (b.lat - a.lat) * Math.PI/180;
+  const dLon = (b.lon - a.lon) * Math.PI/180;
+  const lat1 = a.lat * Math.PI/180;
+  const lat2 = b.lat * Math.PI/180;
+  const sinDLat = Math.sin(dLat/2);
+  const sinDLon = Math.sin(dLon/2);
+  const c = 2 * Math.atan2(
+    Math.sqrt(sinDLat*sinDLat + Math.cos(lat1)*Math.cos(lat2)*sinDLon*sinDLon),
+    Math.sqrt(1 - sinDLat*sinDLat - Math.cos(lat1)*Math.cos(lat2)*sinDLon*sinDLon)
+  );
+  return R * c;
+}
+
+// Reverse geocoding via Nominatim [web:29]
+async function fetchPlaceName(lat, lon) {
+  try {
+    const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&zoom=14&addressdetails=1`;
+    const res = await fetch(url, {
+      headers: { "User-Agent": "TuxGuessr (educational project)" }
+    });
+    const data = await res.json();
+    return data.display_name || "Somewhere near Tux";
+  } catch (e) {
+    return "Somewhere near Tux";
+  }
+}
+
+// Pick random index
+function randomLocationIndex() {
+  return Math.floor(Math.random() * LOCATIONS.length);
+}
+
+async function startRound() {
+  if (LOCATIONS.length === 0) {
+    lastResultEl.textContent = "No valid Mapillary URLs configured.";
+    return;
+  }
+
+  if (currentRound >= TOTAL_ROUNDS) {
+    lastResultEl.textContent = `Game over! Final score: ${Math.round(totalScore)} pts.`;
+    roundScoreEl.textContent = "";
+    guessBtn.disabled = true;
+    nextBtn.disabled = true;
+    return;
+  }
+
+  currentRound++;
+  roundEl.textContent = currentRound;
+
+  if (trueMarker) map.removeLayer(trueMarker);
+  if (guessMarker) map.removeLayer(guessMarker);
+  if (lineLayer) map.removeLayer(lineLayer);
+  trueMarker = null; guessMarker = null; lineLayer = null;
+  guessLatLng = null;
+
+  lastResultEl.textContent = "Loading Mapillary view…";
+  placeNameEl.textContent = "";
+  roundScoreEl.textContent = "";
+  guessBtn.disabled = true;
+  nextBtn.disabled = true;
+  map.setView([47.1355, 11.6939], 12);
+
+  currentIndex = randomLocationIndex();
+  const loc = LOCATIONS[currentIndex];
+
+  embedContainer.innerHTML = loc.iframeHtml;
+  lastResultEl.textContent = "Click on the map to place your guess.";
+}
+
+// Make guess
+guessBtn.addEventListener("click", async () => {
+  if (currentIndex === null || !guessLatLng) return;
+
+  const loc = LOCATIONS[currentIndex];
+  if (!loc) {
+    lastResultEl.textContent = "No data for this location.";
+    guessBtn.disabled = true;
+    nextBtn.disabled = false;
+    return;
+  }
+
+  const { lat, lon } = loc;
+  const trueLatLng = { lat, lon };
+
+  trueMarker = L.marker([lat, lon], { title: "Actual location" }).addTo(map);
+
+  lineLayer = L.polyline([[guessLatLng.lat, guessLatLng.lng], [lat, lon]], {
+    color: "yellow"
+  }).addTo(map);
+  map.fitBounds(lineLayer.getBounds(), { padding: [20, 20] });
+
+  const dist = distanceKm(
+    { lat: guessLatLng.lat, lon: guessLatLng.lng },
+    trueLatLng
+  );
+  let roundScore = Math.max(0, 5000 - 400 * dist);
+  totalScore += roundScore;
+  scoreEl.textContent = Math.round(totalScore);
+
+  lastResultEl.textContent = `You were ${dist.toFixed(2)} km away.`;
+  roundScoreEl.textContent = `Round score: ${Math.round(roundScore)} pts.`;
+
+  const placeName = await fetchPlaceName(lat, lon);
+  placeNameEl.textContent = `Actual location: ${placeName}`;
+
+  guessBtn.disabled = true;
+  nextBtn.disabled = false;
+});
+
+// Next round
+nextBtn.addEventListener("click", () => startRound());
+
+// Reset
+resetBtn.addEventListener("click", () => {
+  currentRound = 0;
+  totalScore = 0;
+  scoreEl.textContent = "0";
+  roundEl.textContent = "0";
+  lastResultEl.textContent = "Game reset. Click Next round to start.";
+  placeNameEl.textContent = "";
+  roundScoreEl.textContent = "";
+  guessBtn.disabled = true;
+  nextBtn.disabled = false;
+});
+
+// Start first round
+nextBtn.disabled = false;
+startRound();
+</script>
+</body>
+</html>
